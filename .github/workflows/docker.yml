@@ -6,8 +6,6 @@ on:
 env:
   REGISTRY: docker.io
   IMAGE_NAME: abhi94feb/kallthebell
-  DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-  DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}    
 
 jobs:
   build-and-test:
@@ -55,13 +53,10 @@ jobs:
           name: build
           path: build/
 
-  docker-build:
+  security-scan:
     runs-on: ubuntu-latest
     needs: build-and-test
-    permissions:
-      contents: read
-      packages: write
-
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -69,48 +64,36 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ env.DOCKER_USERNAME }}
-          password: ${{ env.DOCKER_PASSWORD }}
-
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,format=long
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      - name: Build Docker image
+      - name: Build Docker image locally
         uses: docker/build-push-action@v4
         with:
           context: .
           load: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ env.IMAGE_NAME }}:test
+          push: false
 
-      # Add Trivy scan for Docker image
+      # Trivy scan for Docker image
       - name: Run Trivy vulnerability scanner for Docker image
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          image-ref: ${{ env.IMAGE_NAME }}:test
           format: 'table'
           exit-code: '1'
           ignore-unfixed: true
           severity: 'CRITICAL,HIGH'
           vuln-type: 'os,library'
 
-      - name: Push Docker image
-        uses: docker/build-push-action@v4
+      # Optional: Output detailed Trivy scan report
+      - name: Run Trivy vulnerability scanner (HTML Report)
+        uses: aquasecurity/trivy-action@master
         with:
-          context: .
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          image-ref: ${{ env.IMAGE_NAME }}:test
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          
+      # Upload Trivy scan results to GitHub Security tab
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
