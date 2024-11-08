@@ -4,8 +4,7 @@ on:
   workflow_dispatch:
 
 env:
-  REGISTRY: docker.io
-  IMAGE_NAME: abhi94feb/kallthebell
+  LOCAL_IMAGE_NAME: app:test
 
 jobs:
   build-and-test:
@@ -61,39 +60,35 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Docker image locally
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          load: true
-          tags: ${{ env.IMAGE_NAME }}:test
-          push: false
-
-      # Trivy scan for Docker image
-      - name: Run Trivy vulnerability scanner for Docker image
+      # Build Docker image using standard Docker commands
+      - name: Build Docker image
+        run: |
+          docker build -t ${{ env.LOCAL_IMAGE_NAME }} .
+          
+      # Setup Trivy
+      - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.IMAGE_NAME }}:test
+          image-ref: ${{ env.LOCAL_IMAGE_NAME }}
           format: 'table'
           exit-code: '1'
           ignore-unfixed: true
           severity: 'CRITICAL,HIGH'
           vuln-type: 'os,library'
 
-      # Optional: Output detailed Trivy scan report
-      - name: Run Trivy vulnerability scanner (HTML Report)
+      # Generate SARIF report
+      - name: Run Trivy vulnerability scanner (SARIF report)
         uses: aquasecurity/trivy-action@master
+        continue-on-error: true  # Prevents workflow failure while still generating report
         with:
-          image-ref: ${{ env.IMAGE_NAME }}:test
+          image-ref: ${{ env.LOCAL_IMAGE_NAME }}
           format: 'sarif'
           output: 'trivy-results.sarif'
-          severity: 'CRITICAL,HIGH,MEDIUM'
+          severity: 'CRITICAL,HIGH,MEDIUM,LOW'
           
       # Upload Trivy scan results to GitHub Security tab
       - name: Upload Trivy scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v2
+        if: always()  # Ensures this runs even if previous steps fail
         with:
           sarif_file: 'trivy-results.sarif'
